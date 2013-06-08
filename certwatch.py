@@ -96,11 +96,6 @@ def format_fingerprint(fingerprint):
     return formatted[:-1].upper()
 
 def construct_warning_mail(responsible, warnlist, fromaddr):
-            #~ mail = MIMEMultipart()
-        #~ mail["To"] = self.configFile['mail']['to']
-        #~ mail["From"] = self.configFile['mail']['from']
-        #~ mail["Date"] = self.formatHTTPDate(datetime.utcnow())
-
     mail = MIMEMultipart()
     mail["To"] = responsible
     mail["From"] = fromaddr
