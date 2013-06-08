@@ -1,7 +1,10 @@
 #!/usr/bin/python3
 import re
 import os
+import sys
 import hashlib
+import smtplib
+import logging
 from datetime import datetime, timedelta
 from calendar import timegm
 
@@ -133,6 +136,26 @@ sincerely yours,
 
     return mail
 
+def log_error(msg_base, exc, logging=logging):
+    if not hasattr(exc, "smtp_error"):
+        logging.error("%s: %s", msg_base, exc)
+    else:
+        try:
+            logging.error("%s: %s", msg_base, exc.smtp_error.decode())
+        except UnicodeDecodeError as err:
+            logging.error("%s: (decode of error message failed) %s", msg_base, exc.smtp_error)
+
+def log_smtp_error(exc, logging=logging):
+    log_error("Could not connect to SMTP",
+              exc,
+              logging=logging)
+
+def log_send_error(exc, logging=logging):
+    log_error("While sending mail",
+              exc,
+              logging=logging)
+
+
 if __name__ == "__main__":
     import argparse
     import configparser
@@ -143,8 +166,25 @@ if __name__ == "__main__":
         default="/etc/certwatch.conf",
         help="Config file to use [defaults to /etc/certwatch.conf]"
     )
+    parser.add_argument(
+        "-v", "--verbose",
+        action="count",
+        default=0,
+        help="Increase verbosity level"
+    )
 
     args = parser.parse_args()
+
+    LEVEL_MAP = {
+        0: 'ERROR',
+        1: 'WARNING',
+        2: 'INFO',
+        3: 'DEBUG'
+    }
+
+    logging.basicConfig(format='{}: [%(levelname)s] %(message)s'.format(os.path.basename(sys.argv[0])),
+                        level=LEVEL_MAP.get(args.verbose, 'DEBUG'))
+
 
     args.config = open(args.config, "r")
 
@@ -159,24 +199,100 @@ if __name__ == "__main__":
 
     warnings = {}
 
+    certpath = conf_parser.get("DEFAULT", "certdir", fallback="/")
+
     for section in conf_parser.sections():
-        filename = os.path.expanduser(section)
-        cert, fingerprint = parse_certificate(filename)
+        filename = os.path.join(certpath, os.path.expanduser(section))
+        logging.debug("reading: %s", filename)
+        try:
+            cert, fingerprint = parse_certificate(filename)
+        except FileNotFoundError as err:
+            logging.error(str(err))
+            continue
         ttl = get_ttl(extract_validity(cert))
+        logging.info("cert %s expires in %s",
+                     filename, ttl)
 
         warn_ttl = conf_parser.get(section, "warn")
         if warn_ttl.strip() != "never":
             warn_ttl = parse_config_timedelta(warn_ttl)
             if warn_ttl >= ttl:
                 responsible = conf_parser.get(section, "responsible")
+                logging.debug("cert %s is below warning threshold, "
+                              "notifying %s",
+                              filename,
+                              responsible)
                 warnings.setdefault(responsible, []).append(
                     (filename, cert, fingerprint, ttl)
                 )
+
+
+
+    smtp_host = conf_parser.get("DEFAULT", "smtp_host", fallback="localhost")
+    if not smtp_host.strip():
+        logging.error("Invalid smtp host name: {!r}".format(smtp_host))
+        sys.exit(1)
+    smtp_port = conf_parser.getint("DEFAULT", "smtp_port", fallback=0)
+    try:
+        if conf_parser.getboolean("DEFAULT", "smtp_ssl", fallback=False):
+            smtp = smtplib.SMTP_SSL(smtp_host, smtp_port)
+        else:
+            smtp = smtplib.SMTP(smtp_host, smtp_port)
+            if conf_parser.getboolean("DEFAULT", "smtp_starttls", fallback=True):
+                smtp.starttls()
+        if conf_parser.has_option("DEFAULT", "smtp_helo"):
+            helo = conf_parser["DEFAULT"]["smtp_helo"]
+            try:
+                smtp.ehlo(helo)
+            except:
+                smtp.helo(helo)
+    except ConnectionError as err:
+        log_smtp_error(err)
+        sys.exit(1)
+    except TimeoutError as err:
+        log_smtp_error(err)
+        sys.exit(1)
+    except smtplib.SMTPException as err:
+        log_smtp_error(err)
+        sys.exit(1)
+    except Exception as err:
+        logging.error("while connecting to smtp server:")
+        logging.exception(err)
+        sys.exit(1)
+
+    try:
+        if conf_parser.has_option("DEFAULT", "smtp_user"):
+            smtp.login(conf_parser["DEFAULT"]["smtp_user"], conf_parser.get("DEFAULT", "smtp_password", fallback=""))
+    except smtplib.SMTPAuthenticationError as err:
+        log_smtp_error(err)
+        sys.exit(1)
+
+    mail_from = conf_parser.get("DEFAULT", "from")
 
     for responsible, warnlist in warnings.items():
         mail = construct_warning_mail(
             responsible,
             warnlist,
-            conf_parser.get("DEFAULT", "from")
+            mail_from
         )
-        print(mail.as_string())
+
+        logging.debug("sending mail: to=<%s>, from=<%s>, \n%s",
+                      responsible,
+                      mail_from,
+                      mail)
+        try:
+            smtp.sendmail(mail_from, responsible, mail.as_string())
+        except smtplib.SMTPException as err:
+            log_send_error(err)
+            continue
+        except TimeoutError as err:
+            log_send_error(err)
+            sys.exit(1)
+        except ConnectionError as err:
+            log_send_error(err)
+            sys.exit(1)
+        except Exception as err:
+            log_send_error(err)
+            sys.exit(1)
+
+    smtp.quit()
