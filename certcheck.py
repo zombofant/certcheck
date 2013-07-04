@@ -215,7 +215,11 @@ if __name__ == "__main__":
 
         warn_ttl = conf_parser.get(section, "warn")
         if warn_ttl.strip() != "never":
-            warn_ttl = parse_config_timedelta(warn_ttl)
+            try:
+                warn_ttl = parse_config_timedelta(warn_ttl)
+            except ValueError:
+                logging.error("config error: could not parse time delta: %s", warn_ttl)
+                continue
             if warn_ttl >= ttl:
                 responsible = conf_parser.get(section, "responsible")
                 logging.debug("cert %s is below warning threshold, "
