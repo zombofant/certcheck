@@ -98,7 +98,7 @@ def format_fingerprint(fingerprint):
         formatted += fingerprint[octet_idx*2:(octet_idx+1)*2] + ":"
     return formatted[:-1].upper()
 
-def construct_warning_mail(responsible, warnlist, fromaddr):
+def construct_warning_mail(responsible, warnlist, fromaddr, subjectfmt):
     mail = MIMEMultipart()
     mail["To"] = responsible
     mail["From"] = fromaddr
@@ -107,7 +107,10 @@ def construct_warning_mail(responsible, warnlist, fromaddr):
     warnlist = sorted(warnlist, key=lambda x: x[-1])
     next_expiry = warnlist[0][-1]
 
-    mail["Subject"] = "In {!s}, the next certificate will expire".format(next_expiry)
+    mail["Subject"] = subjectfmt.format(
+        timedelta=str(next_expiry),
+        next_expiry=str(datetime.utcnow()+next_expiry),
+        warn_count=len(warnlist))
 
     text = """Dear administrator,
 
@@ -200,6 +203,9 @@ if __name__ == "__main__":
     warnings = {}
 
     certpath = conf_parser.get("DEFAULT", "certdir", fallback="/")
+    subjectfmt = conf_parser.get(
+        "DEFAULT", "subject",
+        fallback="In {timedelta}, the next certificate will expire")
 
     for section in conf_parser.sections():
         filename = os.path.join(certpath, os.path.expanduser(section))
