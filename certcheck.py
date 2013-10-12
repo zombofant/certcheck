@@ -285,7 +285,8 @@ if __name__ == "__main__":
         mail = construct_warning_mail(
             responsible,
             warnlist,
-            mail_from
+            mail_from,
+            subjectfmt
         )
 
         logging.debug("sending mail: to=<%s>, from=<%s>, \n%s",
