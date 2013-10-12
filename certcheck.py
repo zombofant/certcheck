@@ -57,8 +57,7 @@ def extract_validity(cert):
 
     return parse_date(not_before), parse_date(not_after)
 
-def get_ttl(validity):
-    _, not_after = validity
+def get_ttl(not_after):
     return not_after - datetime.utcnow()
 
 def parse_config_timedelta(s):
@@ -117,17 +116,19 @@ def construct_warning_mail(responsible, warnlist, fromaddr, subjectfmt):
 The following certificates are about to expire:
 """
 
-    for nth, (filename, cert, fingerprint, ttl) in enumerate(warnlist):
+    for nth, (filename, cert, fingerprint, not_after, ttl) in enumerate(warnlist):
         text += """
 {nth:2d}. {filename}
     SHA1: {fingerprint}
     Remaining time: {ttl}
+    Expiry at: {expiry}
 """.format(
                                 nth=nth+1,
                                 filename=os.path.basename(filename),
                                 fingerprint=
                                     format_fingerprint(fingerprint),
-                                ttl=ttl)
+                                ttl=ttl,
+                                expiry=not_after)
 
     text += """
 sincerely yours,
@@ -215,7 +216,8 @@ if __name__ == "__main__":
         except FileNotFoundError as err:
             logging.error(str(err))
             continue
-        ttl = get_ttl(extract_validity(cert))
+        _, not_after = extract_validity(cert)
+        ttl = get_ttl(not_after)
         logging.info("cert %s expires in %s",
                      filename, ttl)
 
@@ -233,7 +235,7 @@ if __name__ == "__main__":
                               filename,
                               responsible)
                 warnings.setdefault(responsible, []).append(
-                    (filename, cert, fingerprint, ttl)
+                    (filename, cert, fingerprint, not_after, ttl)
                 )
 
 
