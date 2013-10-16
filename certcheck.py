@@ -19,7 +19,7 @@ from pyasn1.type.useful import GeneralizedTime
 import pyasn1_modules.pem as pem
 import pyasn1_modules.rfc2459 as x509
 
-CONFIG_TIMEDELTA_RE = re.compile("([0-9]+(.[0-9]*)?)\s*([a-zA-Z]+)")
+CONFIG_TIMEDELTA_RE = re.compile(r"([0-9]+(\.[0-9]*)?)\s*([a-zA-Z]+)")
 
 def parse_certificate(fileobj):
     if isinstance(fileobj, str):
